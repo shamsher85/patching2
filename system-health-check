@@ -1,0 +1,56 @@
+---
+- name: Check system health and disk usage, notify on critical issues
+  hosts: all
+  become: yes
+  tasks:
+
+  # Task 1: Check Disk Usage
+  - name: Gather disk usage
+    shell: df -h | awk '$5 ~ /[0-9]+%/ {print $1 " " $5}'
+    register: disk_usage
+
+  - name: Parse disk usage and flag critical thresholds
+    set_fact:
+      critical_disks: "{{ critical_disks | default([]) + [item] }}"
+    with_items: "{{ disk_usage.stdout_lines }}"
+    when: item.split()[1]|int > 80
+
+  # Task 2: Check CPU Load (1-minute average > 80% as threshold)
+  - name: Gather CPU load
+    shell: cat /proc/loadavg | awk '{print $1}'
+    register: cpu_load
+
+  - name: Flag critical CPU usage
+    set_fact:
+      critical_cpu: "{{ true }}"
+    when: cpu_load.stdout|float > 0.8 * ansible_facts['ansible_processor_cores']
+
+  # Task 3: Send Email if Any Critical Issues are Found
+  - name: Send email notification if disk usage crosses threshold
+    mail:
+      host: smtp.your-email-provider.com
+      port: 587
+      username: "your-email@example.com"
+      password: "your-email-password"
+      to: "recipient@example.com"
+      subject: "Critical System Alert: High Disk/CPU Usage"
+      body: |
+        The following critical issues were detected on {{ ansible_hostname }}:
+
+        {% if critical_disks is defined and critical_disks %}
+        High Disk Usage:
+        {% for disk in critical_disks %}
+        - {{ disk.split()[0] }}: {{ disk.split()[1] }}
+        {% endfor %}
+        {% endif %}
+
+        {% if critical_cpu is defined and critical_cpu %}
+        High CPU Load: {{ cpu_load.stdout }} (exceeding 80% of capacity)
+        {% endif %}
+    when: (critical_disks is defined and critical_disks) or (critical_cpu is defined and critical_cpu)
+
+  # Task 4: Notify in Logs if No Issues Found
+  - name: Log no issues found
+    debug:
+      msg: "No critical system or disk usage issues found."
+    when: not ((critical_disks is defined and critical_disks) or (critical_cpu is defined and critical_cpu))
