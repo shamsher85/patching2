@@ -1,0 +1,61 @@
+---
+- name: Patching Linux and AIX Systems
+  hosts: all
+  become: yes
+  tasks:
+  
+  # Task 1: Identify the Operating System
+  - name: Gather OS details
+    setup:
+    register: os_info
+
+  # Task 2: Patch Linux Machines (using Satellite Server)
+  - name: Patch Linux machines
+    when: os_info.ansible_facts['ansible_system'] == 'Linux'
+    block:
+      - name: Ensure subscription-manager is configured (if required)
+        ansible.builtin.shell: |
+          subscription-manager status || subscription-manager register --auto-attach
+
+      - name: Clean yum cache
+        ansible.builtin.yum:
+          name: '*'
+          state: latest
+          update_cache: yes
+
+      - name: Install updates from Satellite Server
+        ansible.builtin.yum:
+          name: '*'
+          state: latest
+
+  # Task 3: Patch AIX Machines (using IBM Fix Central)
+  - name: Patch AIX machines
+    when: os_info.ansible_facts['ansible_system'] == 'AIX'
+    block:
+      - name: Download AIX updates from IBM Fix Central
+        ansible.builtin.get_url:
+          url: "https://fixcentral.ibm.com/path_to_your_updates"
+          dest: /tmp/aix_updates
+          mode: '0755'
+          validate_certs: no
+
+      - name: Extract AIX updates
+        ansible.builtin.shell: |
+          cd /tmp/aix_updates
+          tar -xvf updates.tar.gz
+
+      - name: Apply AIX updates
+        ansible.builtin.shell: |
+          cd /tmp/aix_updates
+          installp -ac -d . all
+
+      - name: Clean up temporary files
+        ansible.builtin.file:
+          path: /tmp/aix_updates
+          state: absent
+
+  # Task 4: Reboot the system (if needed)
+  - name: Reboot if patches require a restart
+    when: os_info.ansible_facts['ansible_system'] == 'Linux' or os_info.ansible_facts['ansible_system'] == 'AIX'
+    ansible.builtin.reboot:
+      reboot_timeout: 300
